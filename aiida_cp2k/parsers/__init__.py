@@ -85,22 +85,46 @@ class Cp2kParser(Parser):
         abs_fn = out_folder.get_abs_path(fn)
         content = open(abs_fn).read()
 
-        # parse coordinate section
-        m = re.search(r'\n\s*&COORD\n(.*?)\n\s*&END COORD\n', content, DOTALL)
-        coord_lines = [line.strip().split() for line in m.group(1).split("\n")]
-        symbols = [line[0] for line in coord_lines]
-        positions_str = [line[1:] for line in coord_lines]
-        positions = np.array(positions_str, np.float64)
-
         # parse cell section
         m = re.search(r'\n\s*&CELL\n(.*?)\n\s*&END CELL\n', content, re.DOTALL)
         cell_lines = [line.strip().split() for line in m.group(1).split("\n")]
         cell_str = [line[1:] for line in cell_lines if line[0] in 'ABC']
         cell = np.array(cell_str, np.float64)
 
-        # create StructureData
-        atoms = ase.Atoms(symbols=symbols, positions=positions, cell=cell)
-        pair = ('output_structure', StructureData(ase=atoms))
-        new_nodes_list.append(pair)
+        run_type = re.search(r'\n\s*RUN_TYPE\s*(.*?)\n', content, DOTALL).group(1)
+
+        if run_type == 'BAND':
+            # In case of NEB calculation,
+            # add all final replica geometries as output nodes
+            matches = re.findall(r'\n\s*&COORD\n(.*?)\n\s*&END COORD\n', content, DOTALL)
+
+            coord_line_sets = [
+                [line.strip().split() for line in m.split("\n")] for m in matches
+            ]
+            coord_set_with_elements = coord_line_sets[-1]
+            replica_coord_line_sets = coord_line_sets[:-1]
+            element_list = [line[0] for line in coord_set_with_elements]
+            for i_rep, rep_coord_lines in enumerate(replica_coord_line_sets):
+                positions = np.array(rep_coord_lines, np.float64)
+                ase_atoms = ase.Atoms(symbols=element_list, positions=positions, cell=cell)
+                pair = ("opt_replica_%d" % i_rep, StructureData(ase=ase_atoms))
+                new_nodes_list.append(pair)
+
+        else:
+            # By default, add only the first coordinate section found
+            # as the output node
+
+            # parse coordinate section
+            m = re.search(r'\n\s*&COORD\n(.*?)\n\s*&END COORD\n', content, DOTALL)
+            coord_lines = [line.strip().split() for line in m.group(1).split("\n")]
+            symbols = [line[0] for line in coord_lines]
+            positions_str = [line[1:] for line in coord_lines]
+            positions = np.array(positions_str, np.float64)
+
+            # create StructureData
+            atoms = ase.Atoms(symbols=symbols, positions=positions, cell=cell)
+            pair = ('output_structure', StructureData(ase=atoms))
+            new_nodes_list.append(pair)
+
 
 # EOF
